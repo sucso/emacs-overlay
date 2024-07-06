@@ -11,7 +11,11 @@ let
 
 
 in
-{ config
+{
+# a list of config files to parse
+  configs ? null
+# config has been superseded by configs
+, config ? null
 # bool to use the value of config or a derivation whose name is default.el
 , defaultInitFile ? false
 # emulate `use-package-always-ensure` behavior (defaulting to false)
@@ -23,29 +27,52 @@ in
 , override ? (self: super: { })
 }:
 let
-  isOrgModeFile =
+  # checks if a file is a .org file
+  isOrgModeFile = config:
     let
       ext = lib.last (builtins.split "\\." (builtins.toString config));
       type = builtins.typeOf config;
     in
       (type == "path" || lib.hasPrefix "/" config) && ext == "org";
 
-  configText =
+  # whether `configs` is just an org mode file
+  isOrgModeConfig =
+    let
+      length = builtins.length configs;
+      head = builtins.head configs;
+    in
+      (length == 1) && (isOrgModeFile head);
+
+  getConfigText = config:
     let
       type = builtins.typeOf config;
-    in # configText can be sourced from either:
-      # - A string with context { config = "${hello}/config.el"; }
+    in # config texts can be sourced from a list of:
+      # (mixing these types in a single `configs` attribute is allowed)
+      # - strings with context { configs = [ "${hello}/config.el" "${world}/config.el" ]; }
       if type == "string" && builtins.hasContext config && lib.hasPrefix builtins.storeDir config then builtins.readFile config
-      # - A config literal { config = "(use-package foo)"; }
+      # - config literals { configs = [ "(use-package foo)" "(use-package bar)" ]; }
       else if type == "string" then config
-      # - A config path { config = ./config.el; }
+      # - config paths { configs = [ ./init.el ./config.el ]; }
       else if type == "path" then builtins.readFile config
-      # - A derivation { config = pkgs.writeText "config.el" "(use-package foo)"; }
+      # - derivations { configs = [ (pkgs.writeText "foo.el" "(use-package foo)")
+      #                             (pkgs.writeText "bar.el" "(use-package bar)") ]; }
       else if lib.isDerivation config then builtins.readFile "${config}"
-      else throw "Unsupported type for config: \"${type}\"";
+      else throw "Unsupported type for a member of configs: \"${type}\"";
+
+  configTexts =
+    let
+      configNotice = "TODO";
+      configError = "TODO";
+      type = builtins.typeOf configs;
+    in
+    if config != null then lib.warn configNotice [config]
+    else if configs != null then
+      if (type != "list") then getConfigText configs
+      else map getConfigText configs
+    else builtins.throw configError;
 
   packages = parse.parsePackagesFromUsePackage {
-    inherit configText isOrgModeFile alwaysTangle alwaysEnsure;
+    inherit configTexts isOrgModeConfig alwaysTangle alwaysEnsure;
   };
   emacsPackages = (pkgs.emacsPackagesFor package).overrideScope (self: super:
     # for backward compatibility: override was a function with one parameter
@@ -74,7 +101,9 @@ emacsWithPackages (epkgs:
           let
             # name of the default init file must be default.el according to elisp manual
             defaultInitFileName = "default.el";
-            configFile = pkgs.writeText defaultInitFileName configText;
+            # config texts are concatenated following the order of the
+            # list into a single init file
+            configFile = pkgs.writeText defaultInitFileName (builtins.concatStringsSep "\n\n\n" configTexts);
             orgModeConfigFile = pkgs.runCommand defaultInitFileName {
               nativeBuildInputs = [ package ];
             } ''
@@ -88,7 +117,7 @@ emacsWithPackages (epkgs:
             src =
               if defaultInitFile == true
               then
-                if isOrgModeFile
+                if isOrgModeConfig
                 then orgModeConfigFile
                 else configFile
               else

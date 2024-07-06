@@ -45,7 +45,7 @@ let
     parseReqList requires;
 
   # Get a list of packages declared wanted with `use-package` in the
-  # input string `config`. The goal is to only list packages that
+  # input strings `configTexts`. The goal is to only list packages that
   # would be installed by `use-package` on evaluation; thus we look at
   # the `:ensure` and `:disabled` keyword values to attempt to figure
   # out which and whether the package should be installed.
@@ -70,14 +70,14 @@ let
   # ''
   # => [ "direnv" "paredit" ]
   parsePackagesFromUsePackage = {
-    configText
+    configTexts
     , alwaysEnsure ? false
-    , isOrgModeFile ? false
+    , isOrgModeConfig ? false
     , alwaysTangle ? false
   }:
     let
       readFunction =
-        if isOrgModeFile then
+        if isOrgModeConfig then
           fromOrgModeBabelElisp' { ":tangle" = if alwaysTangle then "yes" else "no"; }
         else
           fromElisp;
@@ -147,7 +147,7 @@ let
         else
           [];
     in
-      lib.flatten (map recurse (readFunction configText));
+      builtins.concatLists (map (text: lib.flatten (map recurse (readFunction text))) configTexts);
 
 in
 {
